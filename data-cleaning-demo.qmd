@@ -1,0 +1,84 @@
+---
+title: "data cleaning example"
+author: "Bethlehem MESSELU"
+format: html
+---
+
+```{r}
+#| message: false
+
+here::i_am("data-cleaning.Rproj")
+library(here)
+library(vroom)
+library(dplyr)
+library(tidyr)
+```
+
+## WHO life expectancy data
+
+```{r}
+life <- vroom(here("life expectancy raw.csv"))
+```
+Do not put View(life) in the rendering !
+
+There is apparently two subsets in the data set.
+```{r}
+life |> distinct(IndicatorCode, Indicator)
+```
+```{r}
+life |> count(IndicatorCode, Indicator)
+```
+```{r}
+life_birth <- life |> filter(IndicatorCode=="WHOSIS_000001")
+life_60 <- life |> filter(IndicatorCode=="WHOSIS_000015")
+```
+### Life expectancy at birth
+
+```{r}
+life_birth |> count('Location type')
+```
+```{r}
+life_birth |> count(ParentLocation, ParentLocationCode)
+```
+```{r}
+parent_codes <- life_birth |> distinct(ParentLocationCode, ParentLocation)
+country_codes <- life_birth |> distinct(SpatialDimValueCode, Location)
+```
+```{r}
+life_birth <- life_birth |> select(-ParentLocation, -Location, -`Location type`, - IndicatorCode, -Indicator)
+```
+
+We want to remove variables that have always the same value.
+
+```{r}
+life_birth |> pull(Dim2) |> is.na() |> all()
+```
+With select, if we do not precise where we select wrt the names of the columns and if we specify where we select wrt the properties of the columns.
+
+anyNA: at least one NA
+
+```{r}
+x <- life_birth$Dim2
+x <- life_birth[["Dim2"]] 
+x <- life_birth |> pull(Dim2)
+all(is.na(x))
+x |> is.na() |> all()
+```
+```{r}
+all_na <- function(my_var){ 
+  my_var |> is.na() |> all()
+  }
+```
+```{r}
+all_na(x)
+x |> all_na()
+```
+```{r}
+life_birth |> pull(Dim2) |> all_na()
+```
+```{r}
+life_birth |> select(!where(all_na))
+```
+apply functions on a lot of columns/rows
+
+
