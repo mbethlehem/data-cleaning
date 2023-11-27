@@ -1,84 +1,289 @@
 ---
-title: "data cleaning example"
-author: "Bethlehem MESSELU"
+title: "Data cleaning example"
+author: "Fabrice Rossi"
 format: html
 ---
 
 ```{r}
 #| message: false
-
 here::i_am("data-cleaning.Rproj")
 library(here)
 library(vroom)
 library(dplyr)
 library(tidyr)
+library(ggplot2)
 ```
 
 ## WHO life expectancy data
-
 ```{r}
-life <- vroom(here("life expectancy raw.csv"))
+life <- vroom(here("data", "life expectancy raw.csv"))
 ```
-Do not put View(life) in the rendering !
-
 There is apparently two subsets in the data set.
 ```{r}
 life |> distinct(IndicatorCode, Indicator)
 ```
+
 ```{r}
 life |> count(IndicatorCode, Indicator)
 ```
-```{r}
-life_birth <- life |> filter(IndicatorCode=="WHOSIS_000001")
-life_60 <- life |> filter(IndicatorCode=="WHOSIS_000015")
-```
-### Life expectancy at birth
+
 
 ```{r}
-life_birth |> count('Location type')
+life_birth <- life |> filter(IndicatorCode == "WHOSIS_000001")
+life_60 <- life |> filter(IndicatorCode == "WHOSIS_000015")
 ```
+
+### Life expectancy at birth
+```{r}
+life_birth |> count(`Location type`)
+```
+
 ```{r}
 life_birth |> count(ParentLocation, ParentLocationCode)
 ```
+
 ```{r}
 parent_codes <- life_birth |> distinct(ParentLocationCode, ParentLocation)
 country_codes <- life_birth |> distinct(SpatialDimValueCode, Location)
 ```
+
 ```{r}
-life_birth <- life_birth |> select(-ParentLocation, -Location, -`Location type`, - IndicatorCode, -Indicator)
+life_birth <- life_birth |> 
+  select(-ParentLocation, -Location)
 ```
 
-We want to remove variables that have always the same value.
-
 ```{r}
-life_birth |> pull(Dim2) |> is.na() |> all()
+life_birth |> select(where(is.numeric))
 ```
 With select, if we do not precise where we select wrt the names of the columns and if we specify where we select wrt the properties of the columns.
 
 anyNA: at least one NA
 
 ```{r}
+life_birth |> pull(Dim2) |> is.na() |> all()
+```
+Cette ligne de code nous permet de dire que tous les éléments de cette colonne sont des NA.
+```{r}
 x <- life_birth$Dim2
-x <- life_birth[["Dim2"]] 
+x <- life_birth[["Dim2"]]
 x <- life_birth |> pull(Dim2)
 all(is.na(x))
 x |> is.na() |> all()
 ```
+
 ```{r}
-all_na <- function(my_var){ 
+## this function returns TRUE is all the values of my_var are NA
+all_na <- function(my_var) {
   my_var |> is.na() |> all()
-  }
+}
 ```
+
 ```{r}
 all_na(x)
 x |> all_na()
 ```
+
 ```{r}
 life_birth |> pull(Dim2) |> all_na()
 ```
+Le code ci-dessous nous permet de sélectionner les colonnes qui ne sont pas entièrement remplies de NA.
 ```{r}
 life_birth |> select(!where(all_na))
 ```
-apply functions on a lot of columns/rows
 
+With a lambda, a.k.a. anonymous function, a.k.a. closure. 
+
+```{r}
+life_birth |> select(!where(\(.x) all(is.na(.x))))
+```
+
+```{r}
+all_na_lambda <- \(my_var) all(is.na(my_var))
+```
+
+```{r}
+life_birth <- life_birth |> select(!where(all_na))
+```
+Le code ci-dessous nous permet de voir si la colonne ne prend qu'une seule valeur.
+```{r}
+(life_birth |> pull(ValueType) |> unique() |> length()) == 1
+```
+
+```{r}
+## returns TRUE if the parameter vector contains only one unique value (repeated)
+single_valued <- function(my_var) {
+  (my_var |> unique() |> length()) == 1
+}
+life_birth |> pull(ValueType) |> single_valued()
+life_birth |> pull(SpatialDimValueCode) |> single_valued()
+```
+
+Report the unique values. 
+slice_head sélectionne la/les première(s) ligne(s) 
+slice_tail sélectionne la/les dernière(s) ligne(s)
+```{r}
+life_birth |> select(where(single_valued)) |> slice_head()
+```
+
+```{r}
+life_birth <- life_birth |> select(!where(single_valued))
+```
+
+```{r}
+life_birth |> mutate(diff=abs(FactValueNumeric-Value), .keep="none") |>
+  summarise(max(diff))
+```
+
+```{r}
+life_birth |> 
+  select(-FactValueNumeric, -Dim1ValueCode, -DateModified) |>
+  rename(Region = ParentLocationCode,
+         Country = SpatialDimValueCode,
+         Year = Period,
+         Attribute = Dim1)
+```
+```{r}
+life_reformating <- function(life_df) {
+  single_valued <- function(my_var) {
+    (my_var |> unique() |> length()) == 1
+  }
+  region_codes <- life_df |> 
+    distinct(ParentLocationCode, ParentLocation) |>
+    rename(Region = ParentLocationCode, RegionName = ParentLocation)
+  country_codes <- life_df |> 
+    distinct(SpatialDimValueCode, Location) |>
+    rename(Country = SpatialDimValueCode, CountryName = Location)
+  life <- life_df |>
+    select(-ParentLocation, -Location) |>
+    rename(Region = ParentLocationCode, Country = SpatialDimValueCode) |>
+    select(!where(\(.x) all(is.na(.x))))
+  single_values <- life |> 
+    select(where(single_valued)) |> slice_head()
+  life <- life |>
+    select(-FactValueNumeric, -Dim1ValueCode, -DateModified) |>
+    select(!where(single_valued)) |>
+    rename(Year = Period,
+           Attribute = Dim1)
+  list(region_codes = region_codes,
+       country_codes = country_codes,
+       constants = single_values,
+       life_expectancy = life)
+}
+```
+
+```{r}
+life_birth <- life |> filter(IndicatorCode == "WHOSIS_000001") |> life_reformating()
+life_60 <- life |> filter(IndicatorCode == "WHOSIS_000015") |> life_reformating()
+```
+
+```{r}
+life_birth[["life_expectancy"]] |> 
+  pivot_wider(values_from = Value, names_from = Attribute) |>
+  ggplot(aes(x=Year, y=`Both sexes`, group=Country)) +
+  geom_line(linewidth=0.1)
+```
+```{r}
+life_birth[["life_expectancy"]] |> arrange(Year)
+```
+```{r}
+life_birth[["life_expectancy"]] <- life_birth[["life_expectancy"]] |> filter(Year >= 2000)
+```
+
+```{r}
+life_birth[["life_expectancy"]] |> 
+  pivot_wider(values_from = Value, names_from = Attribute) |>
+  left_join(life_birth[["region_codes"]], join_by(Region)) |>
+  ggplot(aes(x=Year, y=`Both sexes`, group=Country)) +
+  geom_line(linewidth=0.1) +
+  facet_wrap(~RegionName)
+```
+```{r}
+life_birth[["life_expectancy"]] |> 
+  filter(Attribute=="Both sexes") |>
+  group_by(Country) |>
+  arrange(Year) |>
+  reframe(delta=diff(Value)) |>
+  left_join(life_birth[["country_codes"]], join_by(Country)) |>
+  select(CountryName, delta) |>
+  filter(delta<=0) |>
+  arrange(delta)
+```
+
+```{r}
+life_birth[["life_expectancy"]] |> 
+  filter(Attribute=="Both sexes") |>
+  pivot_wider(id_cols = Country, values_from = Value, names_from =Year) |> View()
+```
+
+```{r}
+le_plot <- function(df, region_codes) {
+  df |>
+    pivot_wider(values_from = Value, names_from = Attribute) |>
+  left_join(region_codes, join_by(Region)) |>
+  ggplot(aes(x=Year, y=`Both sexes`, group=Country)) +
+  geom_line(linewidth=0.1) +
+  facet_wrap(~RegionName)
+}
+```
+
+```{r}
+life_birth [["life_expectancy"]] |> le_plot(life_birth[["region_codes"]])
+```
+
+
+```{r}
+life_60[["region_codes"]] |>
+  le_plot(life_60[["life_expectancy"]], region_codes = _)
+```
+
+```{r}
+leb_model <- life_birth[["life_expectancy"]] |> 
+  filter(Attribute!="Both sexes") |> 
+  rename(`Life expectancy at birth`=Value,
+         Sex = Attribute) |>
+  lm(`Life expectancy at birth` ~ Year + Region + Sex, data = _)
+```
+
+```{r}
+summary(leb_model)
+```
+
+
+## First solution
+```{r}
+le_plot_sex <- function(df, region_codes, sex = "Both sexes") {
+  df |>
+    pivot_wider(values_from = Value, names_from = Attribute) |>
+  left_join(region_codes, join_by(Region)) |>
+    filter(Year>="2000") |>
+  ggplot(aes(x=Year, y=.data[[sex]], group=Country)) +  #.data refers to the dataset that has submitted to ggplot 
+  geom_line(linewidth=0.1) +
+  facet_wrap(~RegionName)
+}
+```
+
+```{r}
+life_60[["life_expectancy"]] |> 
+  le_plot_sex(life_60[["region_codes"]], sex = "Male")
+```
+
+
+
+## Second solution
+```{r}
+le_plot_sex <- function(df, region_codes, sex = `Both sexes`) {
+  df |>
+    pivot_wider(values_from = Value, names_from = Attribute) |>
+  left_join(region_codes, join_by(Region)) |>
+    filter(Year>="2000") |>
+  ggplot(aes(x=Year, y={{sex}}, group=Country)) +    #.data refers to the dataset that has submitted to ggplot 
+  geom_line(linewidth=0.1) +
+  facet_wrap(~RegionName)
+}
+```
+
+```{r}
+life_60[["life_expectancy"]] |> 
+  le_plot_sex(life_60[["region_codes"]], sex = Male)  #here is you use "" it will interpret Male as a constant
+```
 
