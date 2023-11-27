@@ -1,0 +1,112 @@
+---
+title: "New York Schools"
+author: "Grace Beyoko"
+format: html
+---
+
+```{r}
+#| message: false
+here::i_am("data-cleaning.Rproj")
+library(here)
+library(vroom)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+
+## Sources
+We work on open data from New York City, available [here](insert link). 
+
+## Data loading 
+The file contains a lot of "s" values that we interpret as missing data. 
+```{r}
+ny <- vroom(here("data",
+                 "2006_-_2012_Math_Test_Results_-_School_-_Gender.csv"), 
+            locale = locale(decimal_mark = "."), 
+            na = "s")
+```
+
+```{r}
+ny |> count(Demographic)
+```
+
+```{r}
+ny |> count(Grade)
+```
+
+```{r}
+ny |> count(Year)
+```
+
+```{r}
+ny |> count(DBN)
+```
+
+## Missing data pattern
+```{r}
+ny |> 
+  group_by(`Number Tested`) |>
+  summarise(sum(is.na(`Pct Level 3`)), n())
+```
+
+## Basic quality assement : Here, you don't trust the data to be correct, so you verify. Here, we know that the missing data are equal to the nber of students. Here the percentage are approximate. 
+```{r}
+ny |> 
+  mutate(perc = round(100*(`Num Level 3`/`Number Tested`), 1),
+         valid = perc == `Pct Level 3`)|> 
+  filter(!is.na(perc)) |>
+    select(`Num Level 3`,`Number Tested`, `Pct Level 3`,perc)
+```
+
+```{r}
+ny |>
+  rowwise() |>
+  mutate(sum(c_across(starts_with("Num "))))
+```
+
+```{r}
+ny_long <-
+  ny |>
+  pivot_longer(! (DBN | Grade | Demographic | Year))
+```
+
+```{r}
+ref_val <- ny_long |>
+  filter(name=="Number Tested")
+cpt_value <- ny_long |> 
+  filter(startsWith(name, "Num Level")) |>
+  filter(name != "Num Level 3 and 4") |>
+  group_by(DBN, Grade, Year, Demographic) |>
+  summarise(Total = sum(value), .groups = "drop")
+``` 
+
+```{r}
+cpm_val <- 
+  ref_val |> 
+  left_join(cpt_value)
+```
+
+```{r}
+cpm_val |>
+  mutate(ok = Total== value) |> 
+  count(ok)
+```
+
+```{r}
+ny |>
+  filter(`Number Tested`<=5) |>
+  nrow()
+```
+
+```{r}
+cpm_notok <- 
+  cpm_val |> 
+  mutate(ok = Total== value) |> 
+  filter(!ok)
+```
+
+```{r}
+ny |>
+  filter(DBN=="07X031")
+```
